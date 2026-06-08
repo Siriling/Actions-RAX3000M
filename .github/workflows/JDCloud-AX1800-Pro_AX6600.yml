@@ -28,6 +28,7 @@ on:
 
 env:
   ###############手动修改##############
+  ##手动设置上传时候的打包名称和tag名称UPLOAD_TAG_NAME
   OPENWRT_NAME: lede
   UPLOAD_TAG_NAME: jdcloud-ax1800-pro_ax6600
   REPO_URL: https://github.com/coolsnowwolf/lede
@@ -43,7 +44,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     permissions:
       contents: write
@@ -56,11 +57,12 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(curl -fsSL git.io/depends-ubuntu-2004)
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        sudo -E apt-get -yqq update
+        sudo -E apt-get -yqq install curl dos2unix python3-netifaces libfuse-dev
+        sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+        sudo -E apt-get -yqq autoremove --purge
+        sudo -E apt-get -yqq clean
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
@@ -137,7 +139,6 @@ jobs:
         cd openwrt
         echo -e "$(nproc) thread compile"
         make -j$(nproc) || make -j1 || make -j1 V=s
-        
         sed -nE 's/.*(192.168\.[0-9]+\.[0-9]+).*/\1/p' package/base-files/files/bin/config_generate | head -n 1 > IP_ADDR
         [ -s IP_ADDR ] && echo "IP_ADDR=$(cat IP_ADDR)" >> $GITHUB_ENV
         if grep -q 'CONFIG_PACKAGE_luci-app-dockerman=y' .config; then
@@ -156,13 +157,21 @@ jobs:
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: | 
-        mapfile -t devices < <(grep '^CONFIG_TARGET_DEVICE.*=y' openwrt/.config | sed -r 's/.*DEVICE_(.*)=y/\1/')
-        cd openwrt/bin/targets/*/*
+        cd openwrt
+        matched_lines=$(grep '^CONFIG_TARGET.*DEVICE_.*=y' .config | grep -v 'PER_DEVICE' | grep -v 'DEVICE_PACKAGES')
+        mapfile -t devices < <(echo "$matched_lines" | sed -n 's/.*DEVICE_\([^=]*\)=y/\1/p')
+        cd bin/targets/*/*
         rm -rf packages
-        sudo -E apt-get -qq install rename
-                for val in "${devices[@]}"; do
-          rename "s/.*${val}/${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${val}${{ env.BUILD_DOCKERMAN }}/" *
-          echo "$val"
+        for val in "${devices[@]}"; do
+                echo "Processing device: $val"
+                for file in *"${val}"*; do
+                        if [ -f "$file" ]; then
+                                suffix="${file#*${val}}"
+                                new_name="${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${val}${{ env.BUILD_DOCKERMAN }}${suffix}"
+                                mv "$file" "$new_name"
+                                echo "  Renamed: $file -> $new_name"
+                        fi
+                done
         done
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT

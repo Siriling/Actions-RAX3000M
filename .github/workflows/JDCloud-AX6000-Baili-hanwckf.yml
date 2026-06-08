@@ -14,6 +14,14 @@ on:
   repository_dispatch:
   workflow_dispatch:
     inputs:
+      REPO_BRANCH:
+        description: 'Select Source Branch'
+        required: true
+        default: 'v7672'
+        type: choice
+        options:
+        - v7672
+        - v7661
       LAN_IP:
         description: 'Set LAN IP Address'
         required: true
@@ -28,11 +36,13 @@ on:
         - v7.6.6.1-fw-20230808(recommend)
         - v7.6.7.2-fw-default
         - v7.6.7.2-fw-20221208
+        - v7.6.7.2-fw-20230306
         - v7.6.7.2-fw-20230421
         - v7.6.7.2-fw-20230808
         - v7.6.7.2-fw-20231024
         - v7.6.6.1-fw-default
         - v7.6.6.1-fw-20221208
+        - v7.6.6.1-fw-20230306
         - v7.6.6.1-fw-20230421
         - v7.6.6.1-fw-20231024
         - v7.6.6.1-fw-20240823
@@ -63,9 +73,11 @@ on:
 
 env:
   ###############手动修改##############
+  ##手动设置上传时候的打包名称和tag名称UPLOAD_TAG_NAME
   OPENWRT_NAME: hanwckf
-  REPO_URL: https://github.com/hanwckf/immortalwrt-mt798x
-  REPO_BRANCH: openwrt-21.02
+  UPLOAD_TAG_NAME: jdcloud_re-cp-03
+  REPO_URL: https://github.com/lgs2007m/immortalwrt-mt798x
+  REPO_BRANCH: ${{ github.event.inputs.REPO_BRANCH || 'v7672' }}
   FEEDS_CONF: JDCloud-AX6000-Baili-hanwckf/feeds.conf.default
   CONFIG_FILE: JDCloud-AX6000-Baili-hanwckf/.mtwifi-cfg.config
   DIY_P1_SH: JDCloud-AX6000-Baili-hanwckf/diy-part1.sh
@@ -77,7 +89,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     permissions:
       contents: write
@@ -90,11 +102,12 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(curl -fsSL git.io/depends-ubuntu-2004)
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        sudo -E apt-get -yqq update
+        sudo -E apt-get -yqq install curl dos2unix python3-netifaces libfuse-dev
+        sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+        sudo -E apt-get -yqq autoremove --purge
+        sudo -E apt-get -yqq clean
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
@@ -158,17 +171,13 @@ jobs:
     - name: 设置WiFi驱动版本
       run: |
         cd openwrt
-        wifi_driver=$(echo "${{ github.event.inputs.WIFI_DRIVER }}" | sed -E 's/^(v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+).*/\1/')
-        firmware=$(echo "${{ github.event.inputs.WIFI_DRIVER }}" | sed -E 's/.*fw-([0-9]{8}|default).*/\1/g')
-        if [ "$wifi_driver" == "v7.6.6.1" ]; then
-                sed -i 's/CONFIG_MTK_MT_WIFI_DRIVER_VERSION_7672=y/CONFIG_MTK_MT_WIFI_DRIVER_VERSION_7661=y/g' .config
-        fi
-        if [ "$firmware" == "default" ]; then
-                sed -i 's/CONFIG_MTK_MT_WIFI_MT7986_20240823=y/CONFIG_MTK_MT_WIFI_MT7986_DEFAULT_FIRMWARE=y/g' .config
-        else
-        	sed -i 's/CONFIG_MTK_MT_WIFI_MT7986_20240823=y/CONFIG_MTK_MT_WIFI_MT7986_${firmware}=y/g' .config
-        fi
+        wifi_driver=$(echo "${{ github.event.inputs.WIFI_DRIVER }}" | awk -F'[-]' '{print $1}')
+        firmware=$(echo "${{ github.event.inputs.WIFI_DRIVER }}" | awk -F'fw-' '{print $2}' | grep -oE '[0-9]{8}|default')
         echo "Use WiFi Driver: $wifi_driver-fw-$firmware"
+        version_num=$(echo "$wifi_driver" | sed 's/v//;s/\.//g')
+        sed -i "s/^\(CONFIG_MTK_MT_WIFI_DRIVER_VERSION_\)[0-9]\{4\}/\1${version_num}/g" .config
+        [ "$firmware" == "default" ] && firmware="DEFAULT_FIRMWARE"
+        sed -i "s/^\(CONFIG_MTK_MT_WIFI_MT798[168]\)_[0-9]\{8\}=y/\1_${firmware}=y/g" .config
 
     - name: 设置交换机驱动
       run: |
@@ -218,16 +227,16 @@ jobs:
         cd openwrt
         echo -e "$(nproc) thread compile"
         make -j$(nproc) || make -j1 || make -j1 V=s
-        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=$(cat DEVICE_NAME)" >> $GITHUB_ENV
-        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*TARGET_.*_(.*)_DEVICE_.*=y/\1/' > TARGET_NAME
-        [ -s TARGET_NAME ] && echo "TARGET_NAME=$(cat TARGET_NAME)" >> $GITHUB_ENV
         sed -n 's/.*lan) ipad=${ipaddr:-"\([0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+\)"} ;;.*/\1/p' package/base-files/files/bin/config_generate | head -n 1 > IP_ADDR
         [ -s IP_ADDR ] && echo "IP_ADDR=$(cat IP_ADDR)" >> $GITHUB_ENV
-        if grep -q 'CONFIG_MTK_MT_WIFI_DRIVER_VERSION_7661=y' .config; then
-                echo "WIFI_VERSION=-v7661" >> $GITHUB_ENV
+        WIFI_VERSION=$(sed -n 's/^CONFIG_MTK_MT_WIFI_DRIVER_VERSION_\([0-9]\+\)=y/\1/p' .config)
+        [ -n "$WIFI_VERSION" ] && echo "WIFI_VERSION=-v$WIFI_VERSION" >> $GITHUB_ENV
+        MT_WIFI_FW=$(sed -nE 's/^CONFIG_MTK_MT_WIFI_(MT798[168])_([0-9]{8})=y/\2/p' .config)
+        if [ -n "$MT_WIFI_FW" ]; then
+                echo "MT_WIFI_FW=-$MT_WIFI_FW" >> $GITHUB_ENV
         else
-                echo "WIFI_VERSION=-v7672" >> $GITHUB_ENV
+                grep -q 'CONFIG_MTK_MT_WIFI_MT798[168]_DEFAULT_FIRMWARE=y' .config && \
+                echo "MT_WIFI_FW=-default" >> $GITHUB_ENV
         fi
         if sed -n '/jdcloud,re-cp-03)/,/;;/p' target/linux/mediatek/mt7986/base-files/etc/board.d/02_network | grep -q 'ucidef_add_switch "switch0"'; then
                 echo "SWITCH=-gsw" >> $GITHUB_ENV
@@ -255,10 +264,22 @@ jobs:
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: | 
-        cd openwrt/bin/targets/*/*
+        cd openwrt
+        matched_lines=$(grep '^CONFIG_TARGET.*DEVICE_.*=y' .config | grep -v 'PER_DEVICE' | grep -v 'DEVICE_PACKAGES')
+        mapfile -t devices < <(echo "$matched_lines" | sed -n 's/.*DEVICE_\([^=]*\)=y/\1/p')
+        cd bin/targets/*/*
         rm -rf packages
-        sudo -E apt-get -qq install rename
-        rename 's/.*${{ env.DEVICE_NAME }}/${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.DEVICE_NAME }}${{ env.WIFI_VERSION }}${{ env.SWITCH }}${{ env.BUILD_DOCKERMAN }}/' *
+        for val in "${devices[@]}"; do
+                echo "Processing device: $val"
+                for file in *"${val}"*; do
+                        if [ -f "$file" ]; then
+                                suffix="${file#*${val}}"
+                                new_name="${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${val}${{ env.WIFI_VERSION }}${{ env.SWITCH }}${{ env.BUILD_DOCKERMAN }}${suffix}"
+                                mv "$file" "$new_name"
+                                echo "  Renamed: $file -> $new_name"
+                        fi
+                done
+        done
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
 
@@ -266,7 +287,7 @@ jobs:
       uses: actions/upload-artifact@main
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: ${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.DEVICE_NAME }}${{ env.WIFI_VERSION }}${{ env.SWITCH }}${{ env.BUILD_DOCKERMAN }}
+        name: ${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.UPLOAD_TAG_NAME }}${{ env.WIFI_VERSION }}${{ env.SWITCH }}${{ env.BUILD_DOCKERMAN }}
         path: ${{ env.FIRMWARE }}
 
     - name: 生成固件Release标签
@@ -277,7 +298,7 @@ jobs:
         echo "- 使用源码：${{ env.REPO_URL }}" >> release.txt
         echo "- 使用分支：${{ env.REPO_BRANCH }}" >> release.txt
         echo "- 登录地址：${{ env.IP_ADDR }}" >> release.txt
-        echo "- 使用WiFi驱动${{ github.event.inputs.WIFI_DRIVER }}" >> release.txt
+        echo "- 使用WiFi驱动: mt_wifi${{ env.WIFI_VERSION }}-fw${{ env.MT_WIFI_FW }}" >> release.txt
         if [[ "${{ env.SWITCH }}" == '-gsw' ]]; then
                echo "- 使用GSW交换机驱动（非DSA）" >> release.txt
         else
@@ -293,7 +314,7 @@ jobs:
         else
                 echo "- 未编译luci-app-dockerman" >> release.txt
         fi
-        echo "release_tag=${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.DEVICE_NAME }}${{ env.WIFI_VERSION }}${{ env.SWITCH }}${{ env.BUILD_DOCKERMAN }}" >> $GITHUB_OUTPUT
+        echo "release_tag=${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.UPLOAD_TAG_NAME }}${{ env.WIFI_VERSION }}${{ env.SWITCH }}${{ env.BUILD_DOCKERMAN }}" >> $GITHUB_OUTPUT
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 发布固件至Release
@@ -303,6 +324,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         files: ${{ env.FIRMWARE }}/*
-        name: ${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.DEVICE_NAME }}${{ env.WIFI_VERSION }}${{ env.SWITCH }}${{ env.BUILD_DOCKERMAN }}
+        name: ${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.UPLOAD_TAG_NAME }}${{ env.WIFI_VERSION }}${{ env.SWITCH }}${{ env.BUILD_DOCKERMAN }}
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt

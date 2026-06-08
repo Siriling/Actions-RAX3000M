@@ -8,16 +8,24 @@
 # Description: Build OpenWrt using GitHub Actions
 #
 ###############手动修改##############
-name: RAX3000M-eMMC_XR30-eMMC-hanwckf
+name: YVR-X6-hanwckf
 
 on:
   repository_dispatch:
   workflow_dispatch:
     inputs:
+      REPO_BRANCH:
+        description: 'Select Source Branch'
+        required: true
+        default: 'v7672'
+        type: choice
+        options:
+        - v7672
+        - v7661
       LAN_IP:
         description: 'Set LAN IP Address'
         required: true
-        default: '192.168.10.1'
+        default: '192.168.1.1'
       WIFI_DRIVER:
         description: 'Choose WiFi Driver'
         required: true
@@ -25,31 +33,21 @@ on:
         type: choice
         options:
         - v7.6.7.2-fw-20240823(recommend)
-        - v7.6.6.1-fw-20230306(recommend)
+        - v7.6.6.1-fw-20230808(recommend)
         - v7.6.7.2-fw-default
+        - v7.6.7.2-fw-20221208
         - v7.6.7.2-fw-20230306
-        - v7.6.7.2-fw-20230330
-        - v7.6.7.2-fw-20230411
-        - v7.6.7.2-fw-20230717
+        - v7.6.7.2-fw-20230421
+        - v7.6.7.2-fw-20230808
         - v7.6.7.2-fw-20231024
         - v7.6.6.1-fw-default
-        - v7.6.6.1-fw-20230330
-        - v7.6.6.1-fw-20230411
-        - v7.6.6.1-fw-20230717
+        - v7.6.6.1-fw-20221208
+        - v7.6.6.1-fw-20230306
+        - v7.6.6.1-fw-20230421
         - v7.6.6.1-fw-20231024
         - v7.6.6.1-fw-20240823
-      EEPROM:
-        description: 'Use nx30pro eeprom and fixed WiFi MAC address'
-        required: true
-        default: true
-        type: boolean
       APP_MTK:
         description: 'Use luci-app-mtk wifi config'
-        required: true
-        default: false
-        type: boolean
-      NO_DOCKERMAN:
-        description: 'Not build luci-app-dockerman'
         required: true
         default: false
         type: boolean
@@ -62,22 +60,15 @@ on:
 
 env:
   ###############手动修改##############
-  ##因为是两个设备，所以手动设置上传时候的打包名称和tag名称UPLOAD_TAG_NAME
-  UPLOAD_TAG_NAME: rax3000m-emmc_xr30-emmc
-  # OPENWRT_NAME: hanwckf
-  # REPO_URL: https://github.com/hanwckf/immortalwrt-mt798x
-  # REPO_BRANCH: openwrt-21.02
-  OPENWRT_NAME: padavanonly
-  REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x
-  REPO_BRANCH: openwrt-21.02
-  # OPENWRT_NAME: zheshifandian
-  # REPO_URL: https://github.com/zheshifandian/immortalwrt-mt798x
-  # REPO_BRANCH: mt6000
-  FEEDS_CONF: RAX3000M-eMMC_XR30-eMMC-hanwckf/feeds.conf.default
-  RAX3000M_EMMC_DTS_FILE: target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7981-cmcc-rax3000m-emmc.dts
-  CONFIG_FILE: RAX3000M-eMMC_XR30-eMMC-hanwckf/.mtwifi-cfg.config
-  DIY_P1_SH: RAX3000M-eMMC_XR30-eMMC-hanwckf/diy-part1.sh
-  DIY_P2_SH: RAX3000M-eMMC_XR30-eMMC-hanwckf/diy-part2.sh
+  ##手动设置上传时候的打包名称和tag名称UPLOAD_TAG_NAME
+  OPENWRT_NAME: hanwckf
+  UPLOAD_TAG_NAME: yvr-x6
+  REPO_URL: https://github.com/lgs2007m/immortalwrt-mt798x
+  REPO_BRANCH: ${{ github.event.inputs.REPO_BRANCH || 'v7672' }}
+  FEEDS_CONF: YVR-X6-hanwckf/feeds.conf.default
+  CONFIG_FILE: YVR-X6-hanwckf/.mtwifi-cfg.config
+  DIY_P1_SH: YVR-X6-hanwckf/diy-part1.sh
+  DIY_P2_SH: YVR-X6-hanwckf/diy-part2.sh
   SSH_ACTIONS: false
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
@@ -85,11 +76,7 @@ env:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-          matrix:
-            os:
-              - ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     permissions:
       contents: write
@@ -102,11 +89,12 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(cat $GITHUB_WORKSPACE/depends/${{ matrix.os }})
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        sudo -E apt-get -yqq update
+        sudo -E apt-get -yqq install curl dos2unix python3-netifaces libfuse-dev
+        sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+        sudo -E apt-get -yqq autoremove --purge
+        sudo -E apt-get -yqq clean
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
@@ -153,13 +141,6 @@ jobs:
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
-    - name: 设置RAX3000M-eMMC的eMMC使用highspeed
-      run: |
-        cd openwrt
-        if ! grep -q 'cap-mmc-highspeed' "${{ env.RAX3000M_EMMC_DTS_FILE }}"; then
-                sed -i -e '/bus-width = <8>;/ a\	cap-mmc-highspeed;' "${{ env.RAX3000M_EMMC_DTS_FILE }}"
-        fi
-
     - name: 设置LAN IP地址（路由器登录地址）
       run: |
         cd openwrt
@@ -177,36 +158,13 @@ jobs:
     - name: 设置WiFi驱动版本
       run: |
         cd openwrt
-        wifi_driver=$(echo "${{ github.event.inputs.WIFI_DRIVER }}" | sed -E 's/^(v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+).*/\1/')
-        firmware=$(echo "${{ github.event.inputs.WIFI_DRIVER }}" | sed -E 's/.*fw-([0-9]{8}|default).*/\1/g')
-        if [ "$wifi_driver" == "v7.6.6.1" ]; then
-                sed -i 's/CONFIG_MTK_MT_WIFI_DRIVER_VERSION_7672=y/CONFIG_MTK_MT_WIFI_DRIVER_VERSION_7661=y/g' .config
-        fi
-        if [ "$firmware" == "default" ]; then
-                sed -i 's/CONFIG_MTK_MT_WIFI_MT7981_20240823=y/CONFIG_MTK_MT_WIFI_MT7981_DEFAULT_FIRMWARE=y/g' .config
-        else
-        	sed -i 's/CONFIG_MTK_MT_WIFI_MT7981_20240823=y/CONFIG_MTK_MT_WIFI_MT7981_${firmware}=y/g' .config
-        fi
+        wifi_driver=$(echo "${{ github.event.inputs.WIFI_DRIVER }}" | awk -F'[-]' '{print $1}')
+        firmware=$(echo "${{ github.event.inputs.WIFI_DRIVER }}" | awk -F'fw-' '{print $2}' | grep -oE '[0-9]{8}|default')
         echo "Use WiFi Driver: $wifi_driver-fw-$firmware"
-
-    - name: 使用nx30pro的高功率eeprom并固定WiFi MAC地址
-      if: github.event.inputs.EEPROM == 'true'
-      run: |
-        cd openwrt
-        wifi_driver=$(echo "${{ github.event.inputs.WIFI_DRIVER }}" | sed -E 's/^(v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+).*/\1/')
-        if [ "$wifi_driver" == "v7.6.6.1" ]; then
-                cp $GITHUB_WORKSPACE/RAX3000M-eMMC_XR30-eMMC-hanwckf/mt79xx_20220907-8b55f5_eeprom.tar.xz dl/mt79xx_20220907-8b55f5.tar.xz
-        else
-                cp $GITHUB_WORKSPACE/RAX3000M-eMMC_XR30-eMMC-hanwckf/mt79xx_20231229-4012a0_eeprom.tar.xz dl/mt79xx_20231229-4012a0.tar.xz
-        fi
-        ## 创建一个辅助文件。文件内容是写入MAC地址到dat文件，固定wifi MAC地址
-        echo -e "\t\tlocal wifi0_mac=\"\$(mmc_get_mac_binary factory 0x04)\"
-        \t\tsed -i \"/^MacAddress=.*/ {s/.*/MacAddress=\$wifi0_mac/;b;}; \\\$aMacAddress=\$wifi0_mac\" /etc/wireless/mediatek/mt7981.dbdc.b0.dat
-        \t\tlocal wifi1_mac=\"\$(macaddr_setbit_la \$wifi0_mac)\"
-        \t\tsed -i \"/^MacAddress=.*/ {s/.*/MacAddress=\$wifi1_mac/;b;}; \\\$aMacAddress=\$wifi1_mac\" /etc/wireless/mediatek/mt7981.dbdc.b1.dat" > temp_insert.txt
-        ## 将文本内容写入02_network
-        sed -i '/mediatek_setup_macs()/,/\};/ {/cmcc,rax3000m-emmc)/ {n;n;n;r temp_insert.txt
-        }}' target/linux/mediatek/mt7981/base-files/etc/board.d/02_network
+        version_num=$(echo "$wifi_driver" | sed 's/v//;s/\.//g')
+        sed -i "s/^\(CONFIG_MTK_MT_WIFI_DRIVER_VERSION_\)[0-9]\{4\}/\1${version_num}/g" .config
+        [ "$firmware" == "default" ] && firmware="DEFAULT_FIRMWARE"
+        sed -i "s/^\(CONFIG_MTK_MT_WIFI_MT798[168]\)_[0-9]\{8\}=y/\1_${firmware}=y/g" .config
 
     - name: 使用luci-app-mtk无线配置
       if: github.event.inputs.APP_MTK == 'true'
@@ -216,12 +174,6 @@ jobs:
         sed -i 's/CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y/CONFIG_PACKAGE_luci-i18n-mtk-zh-cn=y/g' .config
         sed -i 's/CONFIG_PACKAGE_mtwifi-cfg=y/CONFIG_PACKAGE_wifi-profile=y/g' .config
         sed -i 's/CONFIG_PACKAGE_lua-cjson=y/CONFIG_WIFI_NORMAL_SETTING=y/g' .config
-
-    - name: 取消编译dockerman
-      if: github.event.inputs.NO_DOCKERMAN == 'true'
-      run: |
-        cd openwrt
-        sed -i '/CONFIG_PACKAGE_luci-app-dockerman=y/d' .config
 
     - name: SSH链接管理
       uses: P3TERX/ssh2actions@v1.0.0
@@ -245,18 +197,16 @@ jobs:
         cd openwrt
         echo -e "$(nproc) thread compile"
         make -j$(nproc) || make -j1 || make -j1 V=s
-        
         sed -n 's/.*lan) ipad=${ipaddr:-"\([0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+\)"} ;;.*/\1/p' package/base-files/files/bin/config_generate | head -n 1 > IP_ADDR
         [ -s IP_ADDR ] && echo "IP_ADDR=$(cat IP_ADDR)" >> $GITHUB_ENV
-        if grep -q 'CONFIG_MTK_MT_WIFI_DRIVER_VERSION_7661=y' .config; then
-                echo "WIFI_VERSION=-v7661" >> $GITHUB_ENV
+        WIFI_VERSION=$(sed -n 's/^CONFIG_MTK_MT_WIFI_DRIVER_VERSION_\([0-9]\+\)=y/\1/p' .config)
+        [ -n "$WIFI_VERSION" ] && echo "WIFI_VERSION=-v$WIFI_VERSION" >> $GITHUB_ENV
+        MT_WIFI_FW=$(sed -nE 's/^CONFIG_MTK_MT_WIFI_(MT798[168])_([0-9]{8})=y/\2/p' .config)
+        if [ -n "$MT_WIFI_FW" ]; then
+                echo "MT_WIFI_FW=-$MT_WIFI_FW" >> $GITHUB_ENV
         else
-                echo "WIFI_VERSION=-v7672" >> $GITHUB_ENV
-        fi
-        if [ ${{ github.event.inputs.EEPROM }} == 'true' ]; then
-                echo "EEPROM=-eeprom" >> $GITHUB_ENV
-        else
-                echo "EEPROM=" >> $GITHUB_ENV
+                grep -q 'CONFIG_MTK_MT_WIFI_MT798[168]_DEFAULT_FIRMWARE=y' .config && \
+                echo "MT_WIFI_FW=-default" >> $GITHUB_ENV
         fi
         if grep -q 'CONFIG_PACKAGE_mtwifi-cfg=y' .config; then
                 echo "WIFI_INTERFACE=-mtwifi" >> $GITHUB_ENV
@@ -279,13 +229,21 @@ jobs:
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: | 
-        mapfile -t devices < <(grep '^CONFIG_TARGET_DEVICE.*=y' openwrt/.config | sed -r 's/.*DEVICE_(.*)=y/\1/')
-        cd openwrt/bin/targets/*/*
+        cd openwrt
+        matched_lines=$(grep '^CONFIG_TARGET.*DEVICE_.*=y' .config | grep -v 'PER_DEVICE' | grep -v 'DEVICE_PACKAGES')
+        mapfile -t devices < <(echo "$matched_lines" | sed -n 's/.*DEVICE_\([^=]*\)=y/\1/p')
+        cd bin/targets/*/*
         rm -rf packages
-        sudo -E apt-get -qq install rename
         for val in "${devices[@]}"; do
-          rename "s/.*${val}/${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${val}${{ env.WIFI_VERSION }}${{ env.EEPROM }}${{ env.BUILD_DOCKERMAN }}/" *
-          echo "$val"
+                echo "Processing device: $val"
+                for file in *"${val}"*; do
+                        if [ -f "$file" ]; then
+                                suffix="${file#*${val}}"
+                                new_name="${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${val}${{ env.WIFI_VERSION }}${{ env.BUILD_DOCKERMAN }}${suffix}"
+                                mv "$file" "$new_name"
+                                echo "  Renamed: $file -> $new_name"
+                        fi
+                done
         done
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
@@ -294,7 +252,7 @@ jobs:
       uses: actions/upload-artifact@main
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: ${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.UPLOAD_TAG_NAME }}${{ env.WIFI_VERSION }}${{ env.EEPROM }}${{ env.BUILD_DOCKERMAN }}
+        name: ${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.UPLOAD_TAG_NAME }}${{ env.WIFI_VERSION }}${{ env.BUILD_DOCKERMAN }}
         path: ${{ env.FIRMWARE }}
 
     - name: 生成固件Release标签
@@ -305,12 +263,7 @@ jobs:
         echo "- 使用源码：${{ env.REPO_URL }}" >> release.txt
         echo "- 使用分支：${{ env.REPO_BRANCH }}" >> release.txt
         echo "- 登录地址：${{ env.IP_ADDR }}" >> release.txt
-        echo "- 使用WiFi驱动${{ github.event.inputs.WIFI_DRIVER }}" >> release.txt
-        if [[ "${{ env.EEPROM }}" == '-eeprom' ]]; then
-               echo "- 使用nx30pro高功率eeprom并固定WiFi MAC地址" >> release.txt
-        else
-               echo "- 未使用nx30pro高功率eeprom未固定WiFi MAC地址" >> release.txt
-        fi
+        echo "- 使用WiFi驱动: mt_wifi${{ env.WIFI_VERSION }}-fw${{ env.MT_WIFI_FW }}" >> release.txt
         if [[ "${{ env.WIFI_INTERFACE }}" == '-mtwifi' ]]; then
                 echo "- 使用hanwckf mtwifi-cfg原生luci无线配置工具" >> release.txt
         else
@@ -321,7 +274,7 @@ jobs:
         else
                 echo "- 未编译luci-app-dockerman" >> release.txt
         fi
-        echo "release_tag=${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.UPLOAD_TAG_NAME }}${{ env.WIFI_VERSION }}${{ env.EEPROM }}${{ env.BUILD_DOCKERMAN }}" >> $GITHUB_OUTPUT
+        echo "release_tag=${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.UPLOAD_TAG_NAME }}${{ env.WIFI_VERSION }}${{ env.BUILD_DOCKERMAN }}" >> $GITHUB_OUTPUT
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 发布固件至Release
@@ -331,6 +284,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         files: ${{ env.FIRMWARE }}/*
-        name: ${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.UPLOAD_TAG_NAME }}${{ env.WIFI_VERSION }}${{ env.EEPROM }}${{ env.BUILD_DOCKERMAN }}
+        name: ${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-${{ env.UPLOAD_TAG_NAME }}${{ env.WIFI_VERSION }}${{ env.BUILD_DOCKERMAN }}
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
